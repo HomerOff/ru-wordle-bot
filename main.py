@@ -234,7 +234,6 @@ async def set_line_1(message: types.Message, state: FSMContext):
             data['user_words'].append(message.text.lower())
             data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if data['original_word'] == message.text.lower():
-            set_winner(message.from_user.id)
             await user_win(message.from_user.id, data['lines'])
             await state.finish()
         else:
@@ -259,7 +258,6 @@ async def set_line_2(message: types.Message, state: FSMContext):
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
-                set_winner(message.from_user.id)
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
@@ -284,7 +282,6 @@ async def set_line_3(message: types.Message, state: FSMContext):
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
-                set_winner(message.from_user.id)
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
@@ -309,7 +306,6 @@ async def set_line_4(message: types.Message, state: FSMContext):
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
-                set_winner(message.from_user.id)
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
@@ -334,7 +330,6 @@ async def set_line_5(message: types.Message, state: FSMContext):
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
-                set_winner(message.from_user.id)
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
@@ -359,7 +354,6 @@ async def set_line_6(message: types.Message, state: FSMContext):
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
-                set_winner(message.from_user.id)
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
