@@ -91,3 +91,8 @@ class Database:
             for row in result:
                 user_num = row[0]
             return user_num
+
+    def get_count_users(self):
+        with self.connection:
+            result = self.cursor.execute("SELECT COUNT(*) from 'users'").fetchall()
+            return result[0][0]

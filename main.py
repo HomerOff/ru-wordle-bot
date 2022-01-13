@@ -13,7 +13,7 @@ from aiogram.dispatcher.filters.state import StatesGroup, State
 
 from db import Database
 from config import bot, photo_id, admin_id, user_dictionary, bot_dictionary, date_start
-from markups import mainMenu
+from markups import mainMenu, mainChoice
 
 logging.basicConfig(format=u'%(filename)+13s [ LINE:%(lineno)-4s] %(levelname)-8s [%(asctime)s] %(message)s',
                     level=logging.INFO)
@@ -37,11 +37,22 @@ class NewGame(StatesGroup):
     line_6 = State()
 
 
+class AdminMessage(StatesGroup):
+    user_message = State()
+    user_apply = State()
+
+
+class AdminEdits(StatesGroup):
+    user_apply = State()
+
+
 async def new_word():
     with open(bot_dictionary, "r", encoding='utf-8') as word_list:
         bot_dictionary_list = word_list.read().split('\n')
     db.add_word(random.choice(bot_dictionary_list))
-    await bot.send_message(admin_id, 'Новое слово сегодня №' + str((datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days) + ' - ' + db.get_word(), reply_markup=mainMenu)
+    await bot.send_message(admin_id, 'Новое слово сегодня №' + str(
+        (datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days) + ' - ' + db.get_word(),
+                           reply_markup=mainMenu)
 
 
 async def scheduler():
@@ -77,24 +88,43 @@ async def start(message: types.Message):
 @dp.message_handler(commands=['now_word'])
 async def bot_now_word(message: types.Message):
     if message.from_user.id == admin_id:
-        await bot.send_message(message.from_user.id,
-                               db.get_word(),
-                               reply_markup=mainMenu)
+        await bot.send_message(message.from_user.id, db.get_word(), reply_markup=mainMenu)
+    else:
+        await bot.send_message(message.from_user.id, "Ошибка\nВы не администратор!")
 
 
 @dp.message_handler(commands=['new_word'])
 async def bot_new_word(message: types.Message):
     if message.from_user.id == admin_id:
-        await new_word()
-        await bot.send_message(message.from_user.id,
-                               'Вы изменили слово!',
+        await bot.send_message(message.from_user.id, 'Выполнить данное действие?', reply_markup=mainChoice)
+        await AdminEdits.user_apply.set()
+    else:
+        await bot.send_message(message.from_user.id, "Ошибка\nВы не администратор!")
+
+
+@dp.message_handler(commands=['count_users'])
+async def bot_notice(message: types.Message):
+    if message.from_user.id == admin_id:
+        await bot.send_message(message.from_user.id, f"Количество пользователей: {db.get_count_users()}",
                                reply_markup=mainMenu)
+    else:
+        await bot.send_message(message.from_user.id, "Ошибка\nВы не администратор!")
+
+
+@dp.message_handler(commands=['users_notice'])
+async def bot_notice(message: types.Message):
+    if message.from_user.id == admin_id:
+        await bot.send_message(message.from_user.id, "Укажите сообщение, которое будет отправлено всем пользователям: ")
+        await AdminMessage.user_message.set()
+    else:
+        await bot.send_message(message.from_user.id, "Ошибка\nВы не администратор!")
 
 
 @dp.message_handler(content_types=['text'])
 async def bot_menu(message: types.Message):
     if message.text == 'Новая игра':
-        if not (datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days == db.get_played_time(message.from_user.id):
+        if not (datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days == db.get_played_time(
+                message.from_user.id):
             await bot.send_message(message.from_user.id, "Игра началась!\n"
                                                          "Введите Ваше слово:",
                                    reply_markup=types.ReplyKeyboardRemove())
@@ -143,13 +173,15 @@ async def bot_get_photo(message: types.Message):
         await bot.send_message(message.from_user.id, f"ID файла:\n{document_id}")
 
 
-def check_line(message):
+def check_line(message, user_words=[]):
     if not bool(re.search('[а-яА-Я]', message)):
         return 'Введены некорректные символы!\nВведите другое слово:'
     elif not len(message) == 5:
         return 'Необходимо ввести слово состоящие из 5 букв!\nВведите другое слово:'
-    elif not message in user_dictionary_list:
+    elif not (message in user_dictionary_list):
         return 'Такого слова нет в словаре!\nВведите другое слово:'
+    elif message in user_words:
+        return 'Вы уже вводили это слово!\nВведите другое слово:'
     else:
         return False
 
@@ -166,12 +198,27 @@ def get_blocks(message, word):
     return blocks
 
 
-def set_winner(id):
-    db.add_winning(id)
-    db.add_current_streak(id, True)
-    if db.get_current_streak(id) > db.get_max_streak(id):
-        db.add_max_streak(id)
-    db.add_played_time(id)
+def set_winner(user_id):
+    db.add_winning(user_id)
+    db.add_current_streak(user_id, True)
+    if db.get_current_streak(user_id) > db.get_max_streak(user_id):
+        db.add_max_streak(user_id)
+    db.add_played_time(user_id)
+
+
+def set_loser(user_id):
+    db.add_losing(user_id)
+    db.add_current_streak(user_id, False)
+    db.add_played_time(user_id)
+
+
+async def user_win(user_id, lines):
+    set_winner(user_id)
+    await bot.send_message(user_id, "Поздравляем! Вы угадали слово.")
+    backslash = '\n'
+    await bot.send_message(user_id,
+                           f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} {len(lines)}/6\n\n"
+                           f"{backslash.join(lines)}", reply_markup=mainMenu)
 
 
 @dp.message_handler(state=NewGame.line_1)
@@ -181,173 +228,189 @@ async def set_line_1(message: types.Message, state: FSMContext):
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
+            data['user_words'] = []
+            data['lines'] = []
             data['original_word'] = db.get_word()
-            data['line_1'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if data['original_word'] == message.text.lower():
             set_winner(message.from_user.id)
-            await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-            await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 1/6\n\n"
-                                                         f"{data['line_1']}", reply_markup=mainMenu)
+            await user_win(message.from_user.id, data['lines'])
             await state.finish()
         else:
-            await bot.send_message(message.from_user.id, f"{data['line_1']}\n"
-                                                         f"\nВведите следующее слово:")
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
             await NewGame.next()
 
 
 @dp.message_handler(state=NewGame.line_2)
 async def set_line_2(message: types.Message, state: FSMContext):
-    check_result = check_line(message.text.lower())
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
     if check_result:
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
-            data['line_2'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if not db.get_word() == data['original_word']:
-            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!", reply_markup=mainMenu)
+            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!",
+                                   reply_markup=mainMenu)
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
                 set_winner(message.from_user.id)
-                await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-                await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 2/6\n\n"
-                                                             f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n", reply_markup=mainMenu)
+                await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                await bot.send_message(message.from_user.id, f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"\nВведите следующее слово:")
+                await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
                 await NewGame.next()
 
 
 @dp.message_handler(state=NewGame.line_3)
 async def set_line_3(message: types.Message, state: FSMContext):
-    check_result = check_line(message.text.lower())
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
     if check_result:
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
-            data['line_3'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if not db.get_word() == data['original_word']:
-            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!", reply_markup=mainMenu)
+            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!",
+                                   reply_markup=mainMenu)
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
                 set_winner(message.from_user.id)
-                await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-                await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 3/6\n\n"
-                                                             f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n", reply_markup=mainMenu)
+                await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                await bot.send_message(message.from_user.id, f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"\nВведите следующее слово:")
+                await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
                 await NewGame.next()
 
 
 @dp.message_handler(state=NewGame.line_4)
 async def set_line_4(message: types.Message, state: FSMContext):
-    check_result = check_line(message.text.lower())
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
     if check_result:
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
-            data['line_4'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if not db.get_word() == data['original_word']:
-            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!", reply_markup=mainMenu)
+            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!",
+                                   reply_markup=mainMenu)
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
                 set_winner(message.from_user.id)
-                await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-                await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 4/6\n\n"
-                                                             f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"{data['line_4']}\n", reply_markup=mainMenu)
+                await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                await bot.send_message(message.from_user.id, f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"{data['line_4']}\n"
-                                                             f"\nВведите следующее слово:")
+                await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
                 await NewGame.next()
 
 
 @dp.message_handler(state=NewGame.line_5)
 async def set_line_5(message: types.Message, state: FSMContext):
-    check_result = check_line(message.text.lower())
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
     if check_result:
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
-            data['line_5'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if not db.get_word() == data['original_word']:
-            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!", reply_markup=mainMenu)
+            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!",
+                                   reply_markup=mainMenu)
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
                 set_winner(message.from_user.id)
-                await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-                await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 5/6\n\n"
-                                                             f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"{data['line_4']}\n"
-                                                             f"{data['line_5']}\n", reply_markup=mainMenu)
+                await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                await bot.send_message(message.from_user.id, f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"{data['line_4']}\n"
-                                                             f"{data['line_5']}\n"
-                                                             f"\nВведите следующее слово:")
+                await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
                 await NewGame.next()
 
 
 @dp.message_handler(state=NewGame.line_6)
 async def set_line_6(message: types.Message, state: FSMContext):
-    check_result = check_line(message.text.lower())
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
     if check_result:
         await bot.send_message(message.from_user.id, check_result)
     else:
         async with state.proxy() as data:
-            data['line_6'] = get_blocks(message.text.lower(), data['original_word'])
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
         if not db.get_word() == data['original_word']:
-            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!", reply_markup=mainMenu)
+            await bot.send_message(message.from_user.id, "Слово уже было изменено. Начните новую игру!",
+                                   reply_markup=mainMenu)
             await state.finish()
         else:
             if data['original_word'] == message.text.lower():
                 set_winner(message.from_user.id)
-                await bot.send_message(message.from_user.id, "Поздравляем! Вы угадали слово.")
-                await bot.send_message(message.from_user.id, f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} 6/6\n\n"
-                                                             f"{data['line_1']}\n"
-                                                             f"{data['line_2']}\n"
-                                                             f"{data['line_3']}\n"
-                                                             f"{data['line_4']}\n"
-                                                             f"{data['line_5']}\n"
-                                                             f"{data['line_6']}\n", reply_markup=mainMenu)
+                await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                db.add_losing(message.from_user.id)
-                db.add_current_streak(message.from_user.id, False)
-                db.add_played_time(message.from_user.id)
+                set_loser(message.from_user.id)
                 await bot.send_message(message.from_user.id, f"Вы не угадали слово - {data['original_word']}")
+                backslash = '\n'
                 await bot.send_message(message.from_user.id,
                                        f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} X/6*\n\n"
-                                       f"{data['line_1']}\n"
-                                       f"{data['line_2']}\n"
-                                       f"{data['line_3']}\n"
-                                       f"{data['line_4']}\n"
-                                       f"{data['line_5']}\n"
-                                       f"{data['line_6']}\n", reply_markup=mainMenu)
+                                       f"{backslash.join(data['lines'])}", reply_markup=mainMenu)
                 await state.finish()
+
+
+@dp.message_handler(state=AdminMessage.user_message)
+async def set_admin_choice(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['user_message'] = message.text
+    await AdminMessage.next()
+    await bot.send_message(message.from_user.id, 'Выполнить данное действие?', reply_markup=mainChoice)
+
+
+@dp.message_handler(state=AdminMessage.user_apply)
+async def set_admin_result(message: types.Message, state: FSMContext):
+    if message.text == '✅':
+        async with state.proxy() as data:
+            data['user_apply'] = message.text
+        await bot.send_message(message.from_user.id, 'Сообщения отправляются, ожидайте...',
+                               reply_markup=types.ReplyKeyboardRemove())
+        user_count = 0
+        for user in db.get_users():
+            try:
+                await bot.send_message(user[0], data['user_message'])
+                user_count += 1
+            except:
+                await bot.send_message(message.from_user.id, f'Юзер с ID {str(user[0])} не найден!')
+        await bot.send_message(message.from_user.id, f'Сообщение было отправлено всем пользователям!\n'
+                                                     f'Количество отправленных сообщений: {str(user_count)}',
+                               reply_markup=mainMenu)
+    else:
+        await bot.send_message(message.from_user.id, 'Сообщение НЕ было отправлено!', reply_markup=mainMenu)
+    await state.finish()
+
+
+@dp.message_handler(state=AdminEdits.user_apply)
+async def set_admin_word(message: types.Message, state: FSMContext):
+    if message.text == '✅':
+        await new_word()
+        await bot.send_message(message.from_user.id, f'Вы изменили слово дня!\nНовое слово: {db.get_word()}',
+                               reply_markup=mainMenu)
+    else:
+        await bot.send_message(message.from_user.id, 'Слово дня НЕ было изменено!', reply_markup=mainMenu)
+    await state.finish()
 
 
 async def on_startup(_):
