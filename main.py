@@ -27,6 +27,9 @@ db = Database('database.db')
 with open(user_dictionary, "r", encoding='utf-8') as word_list:
     user_dictionary_list = word_list.read().split('\n')
 
+with open(bot_dictionary, "r", encoding='utf-8') as word_list_plus:
+    bot_dictionary_list_plus = word_list_plus.read().split('\n')
+
 
 class NewGame(StatesGroup):
     line_1 = State()
@@ -35,6 +38,15 @@ class NewGame(StatesGroup):
     line_4 = State()
     line_5 = State()
     line_6 = State()
+
+
+class NewGamePlus(StatesGroup):
+    line_1_plus = State()
+    line_2_plus = State()
+    line_3_plus = State()
+    line_4_plus = State()
+    line_5_plus = State()
+    line_6_plus = State()
 
 
 class AdminMessage(StatesGroup):
@@ -47,9 +59,9 @@ class AdminEdits(StatesGroup):
 
 
 async def new_word():
-    with open(bot_dictionary, "r", encoding='utf-8') as word_list:
-        bot_dictionary_list = word_list.read().split('\n')
-    db.add_word(random.choice(bot_dictionary_list))
+    with open(bot_dictionary, "r", encoding='utf-8') as word_list_wordle:
+        bot_dictionary_list_wordle = word_list_wordle.read().split('\n')
+    db.add_word(random.choice(bot_dictionary_list_wordle))
     await bot.send_message(admin_id, 'Новое слово сегодня №' + str(
         (datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days) + ' - ' + db.get_word(),
                            reply_markup=mainMenu)
@@ -133,6 +145,20 @@ async def bot_menu(message: types.Message):
             await bot.send_message(message.from_user.id,
                                    "Вы уже играли сегодня! Завтра будет доступно следующее слово.",
                                    reply_markup=mainMenu)
+    elif message.text == 'Новая игра +':
+        if db.get_word_plus(message.from_user.id):
+            await bot.send_message(message.from_user.id, "Игра началась!\n"
+                                                         "Введите Ваше слово:",
+                                   reply_markup=types.ReplyKeyboardRemove())
+            await NewGamePlus.line_1_plus.set()
+        else:
+            await bot.send_message(message.from_user.id,
+                                   "Этот режим создан для тех, у кого нет желания каждый день ожидать новое слово. "
+                                   "С помощью \"Новой игры +\" Вы можете отгадывать слова "
+                                   "неограниченное количество раз.\n"
+                                   "Приятной игры!\n\nВведите Ваше слово:",
+                                   reply_markup=types.ReplyKeyboardRemove())
+            await NewGamePlus.line_1_plus.set()
     elif message.text == 'Правила':
         await bot.send_message(message.from_user.id,
                                "Угадайте Вордли за 6 попыток. После каждой отгадки цвет плитки будет меняться, "
@@ -155,11 +181,24 @@ async def bot_menu(message: types.Message):
             current_streak = db.get_current_streak(message.from_user.id)
             max_streak = db.get_max_streak(message.from_user.id)
             await bot.send_message(message.from_user.id,
+                                   f"*Статистика режима \"Новая игра\":*\n"
                                    f"Сыграно: *{winning + losing}*\n"
                                    f"Выигрыши: *{round(winning / (winning + losing) * 100, 1)}%*\n"
                                    f"Текущая череда побед: *{current_streak}*\n"
                                    f"Максимальная череда побед: *{max_streak}*\n", parse_mode='Markdown',
                                    reply_markup=mainMenu)
+            if db.get_word_plus(message.from_user.id):
+                winning_plus = db.get_winning_plus(message.from_user.id)
+                losing_plus = db.get_losing_plus(message.from_user.id)
+                current_streak_plus = db.get_current_streak_plus(message.from_user.id)
+                max_streak_plus = db.get_max_streak_plus(message.from_user.id)
+                await bot.send_message(message.from_user.id,
+                                       f"*Статистика режима \"Новая игра +\":*\n"
+                                       f"Сыграно: *{winning_plus + losing_plus}*\n"
+                                       f"Выигрыши: *{round(winning_plus / (winning_plus + losing_plus) * 100, 1)}%*\n"
+                                       f"Текущая череда побед: *{current_streak_plus}*\n"
+                                       f"Максимальная череда побед: *{max_streak_plus}*\n", parse_mode='Markdown',
+                                       reply_markup=mainMenu)
         else:
             await bot.send_message(message.from_user.id, "Вы еще ни разу не играли!", reply_markup=mainMenu)
     else:
@@ -198,26 +237,55 @@ def get_blocks(message, word):
     return blocks
 
 
-def set_winner(user_id):
+async def set_loser(user_id, lines, original_word):
+    db.add_losing(user_id)
+    db.add_current_streak(user_id, False)
+    db.add_played_time(user_id)
+    await bot.send_message(user_id, f"Вы не угадали слово - {original_word}")
+    backslash = '\n'
+    await bot.send_message(user_id,
+                           f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} X/6*\n\n"
+                           f"{backslash.join(lines)}", reply_markup=mainMenu)
+
+
+async def user_win(user_id, lines):
     db.add_winning(user_id)
     db.add_current_streak(user_id, True)
     if db.get_current_streak(user_id) > db.get_max_streak(user_id):
         db.add_max_streak(user_id)
     db.add_played_time(user_id)
-
-
-def set_loser(user_id):
-    db.add_losing(user_id)
-    db.add_current_streak(user_id, False)
-    db.add_played_time(user_id)
-
-
-async def user_win(user_id, lines):
-    set_winner(user_id)
     await bot.send_message(user_id, "Поздравляем! Вы угадали слово.")
     backslash = '\n'
     await bot.send_message(user_id,
                            f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} {len(lines)}/6\n\n"
+                           f"{backslash.join(lines)}", reply_markup=mainMenu)
+
+
+def set_new_word_plus(user_id):
+    user_word = random.choice(bot_dictionary_list_plus)
+    db.add_word_plus(user_id, user_word)
+    return user_word
+
+
+async def set_loser_plus(user_id, lines, original_word):
+    db.add_losing_plus(user_id)
+    db.add_current_streak_plus(user_id, False)
+    await bot.send_message(user_id, f"Вы не угадали слово - {original_word}")
+    backslash = '\n'
+    await bot.send_message(user_id,
+                           f"@RuWordleBot {str(db.get_winning_plus(user_id) + db.get_losing_plus(user_id))}+ X/6*\n\n"
+                           f"{backslash.join(lines)}", reply_markup=mainMenu)
+
+
+async def user_win_plus(user_id, lines):
+    db.add_winning_plus(user_id)
+    db.add_current_streak_plus(user_id, True)
+    if db.get_current_streak_plus(user_id) > db.get_max_streak_plus(user_id):
+        db.add_max_streak_plus(user_id)
+    await bot.send_message(user_id, "Поздравляем! Вы угадали слово.")
+    backslash = '\n'
+    await bot.send_message(user_id,
+                           f"@RuWordleBot {str(db.get_winning_plus(user_id) + db.get_losing_plus(user_id))}+ {len(lines)}/6\n\n"
                            f"{backslash.join(lines)}", reply_markup=mainMenu)
 
 
@@ -357,13 +425,123 @@ async def set_line_6(message: types.Message, state: FSMContext):
                 await user_win(message.from_user.id, data['lines'])
                 await state.finish()
             else:
-                set_loser(message.from_user.id)
-                await bot.send_message(message.from_user.id, f"Вы не угадали слово - {data['original_word']}")
-                backslash = '\n'
-                await bot.send_message(message.from_user.id,
-                                       f"@RuWordleBot {(datetime.now() - datetime.strptime(date_start, '%Y-%m-%d')).days} X/6*\n\n"
-                                       f"{backslash.join(data['lines'])}", reply_markup=mainMenu)
+                await set_loser(message.from_user.id, data['lines'], data['original_word'])
                 await state.finish()
+
+
+@dp.message_handler(state=NewGamePlus.line_1_plus)
+async def set_line_1_plus(message: types.Message, state: FSMContext):
+    check_result = check_line(message.text.lower())
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'] = []
+            data['lines'] = []
+            data['original_word'] = set_new_word_plus(message.from_user.id)
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
+            await NewGamePlus.next()
+
+
+@dp.message_handler(state=NewGamePlus.line_2_plus)
+async def set_line_2_plus(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
+            await NewGamePlus.next()
+
+
+@dp.message_handler(state=NewGamePlus.line_3_plus)
+async def set_line_3_plus(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
+            await NewGamePlus.next()
+
+
+@dp.message_handler(state=NewGamePlus.line_4_plus)
+async def set_line_4_plus(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
+            await NewGamePlus.next()
+
+
+@dp.message_handler(state=NewGamePlus.line_5_plus)
+async def set_line_5_plus(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await bot.send_message(message.from_user.id, '\n'.join(data['lines']) + "\n\nВведите следующее слово:")
+            await NewGamePlus.next()
+
+
+@dp.message_handler(state=NewGamePlus.line_6_plus)
+async def set_line_6_plus(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        pass
+    check_result = check_line(message.text.lower(), data['user_words'])
+    if check_result:
+        await bot.send_message(message.from_user.id, check_result)
+    else:
+        async with state.proxy() as data:
+            data['user_words'].append(message.text.lower())
+            data['lines'].append(get_blocks(message.text.lower(), data['original_word']))
+        if data['original_word'] == message.text.lower():
+            await user_win_plus(message.from_user.id, data['lines'])
+            await state.finish()
+        else:
+            await set_loser_plus(message.from_user.id, data['lines'], data['original_word'])
+            await state.finish()
 
 
 @dp.message_handler(state=AdminMessage.user_message)
